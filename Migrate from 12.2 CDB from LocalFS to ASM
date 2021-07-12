@@ -1,0 +1,630 @@
+ Migrate Non-Asm Multitenant Oracle DB  to ASM in 12.2  online
+ -------------------------------------------------------------
+
+ we need to set up the ASM  disks with sufficient disk space to occupy the new DB
+
+ Step 1 
+ ------
+
+ Please add a new raw disk to you VM.
+
+ Ref:
+
+https://youtu.be/BM6M24uZjNQ
+ 
+
+ use Fdisk and get the partitions created as below
+ ------------------------------------------------
+
+I have added a 11 GB Disk as below
+ 
+[root@localhost ~]# ls /dev/sdc
+/dev/sdc
+
+[root@localhost ~]# fdisk /dev/sdc
+Welcome to fdisk (util-linux 2.23.2).
+
+Changes will remain in memory only, until you decide to write them.
+Be careful before using the write command.
+
+Device does not contain a recognized partition table
+Building a new DOS disklabel with disk identifier 0xa8d97ddc.
+
+Command (m for help): n
+Partition type:
+   p   primary (0 primary, 0 extended, 4 free)
+   e   extended
+Select (default p): 
+Using default response p
+Partition number (1-4, default 1): 
+First sector (2048-23031071, default 2048): 
+Using default value 2048
+Last sector, +sectors or +size{K,M,G} (2048-23031071, default 23031071): 
+Using default value 23031071
+Partition 1 of type Linux and of size 11 GiB is set
+
+Command (m for help): w
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+Syncing disks.
+[root@localhost ~]# fdisk -l
+
+Disk /dev/sda: 51.5 GB, 51539607552 bytes, 100663296 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk label type: dos
+Disk identifier: 0x00001d4b
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *        2048     2099199     1048576   83  Linux
+/dev/sda2         2099200   100663295    49282048   8e  Linux LVM
+
+Disk /dev/sdb: 17.1 GB, 17056710656 bytes, 33313888 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk label type: dos
+Disk identifier: 0x81d0a24c
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sdb1            2048    10487807     5242880   83  Linux
+/dev/sdb2        10487808    20973567     5242880   83  Linux
+/dev/sdb3        20973568    33313887     6170160   83  Linux
+
+Disk /dev/sdc: 11.8 GB, 11791908864 bytes, 23031072 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk label type: dos
+Disk identifier: 0xa8d97ddc
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sdc1            2048    23031071    11514512   83  Linux
+
+Disk /dev/mapper/ol-root: 45.3 GB, 45306871808 bytes, 88489984 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+
+
+Disk /dev/mapper/ol-swap: 5154 MB, 5154799616 bytes, 10067968 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+
+[root@localhost ~]# ls /dev/sdc*
+/dev/sdc  /dev/sdc1
+[root@localhost ~]# ls /dev/sdb*
+/dev/sdb  /dev/sdb1  /dev/sdb2  /dev/sdb3
+
+
+ you can see sdc is my new disk,sdb's are the once which was created earlier during the Grid infra instalaion in the previous
+practical.
+
+
+ Step 2
+ ------
+ 
+ intiate the the disk as a ASM disk
+ 
+ 
+[root@localhost ~]# oracleasm createdisk DATA2 /dev/sdc1
+Writing disk header: done
+Instantiating disk: done
+[root@localhost ~]# oracleasm listdisks
+CRS1
+DATA1
+DATA2
+FRA1
+
+create a new ASM disk group
+
+
+[root@localhost ~]# xhost +
+access control disabled, clients can connect from any host
+[root@localhost ~]# su - grid
+Last login: Sat Jul 10 17:48:40 +0530 2021 on pts/1
+[grid@localhost ~]$ export DISPLAY=:0.0
+[grid@localhost ~]$ asmca
+
+
+Step 3
+------ 
+
+Now It is time to start the migration to ASM
+
+ lets check the non ASM  database
+ 
+ 
+ [oracle@localhost ~]$ ps -ef | grep pmon
+ 
+grid      3322     1  0 17:38 ?        00:00:00 asm_pmon_+ASM
+oracle    3378     1  0 17:38 ?        00:00:00 ora_pmon_orcllcdb
+oracle    3834     1  0 17:39 ?        00:00:00 ora_pmon_asmcdb
+oracle   11455 11302  0 17:52 pts/2    00:00:00 grep --color=auto pmon
+[oracle@localhost ~]$ export ORACLE_SID=orcllcdb
+[oracle@localhost ~]$ rman target /
+
+Recovery Manager: Release 12.2.0.1.0 - Production on Sat Jul 10 17:53:14 2021
+
+Copyright (c) 1982, 2017, Oracle and/or its affiliates.  All rights reserved.
+
+connected to target database: ORCLLCDB (DBID=1978884231)
+
+RMAN> report schema
+2> ;
+
+using target database control file instead of recovery catalog
+Report of database schema for database with db_unique_name ORCLLCDB
+
+List of Permanent Datafiles
+===========================
+File Size(MB) Tablespace           RB segs Datafile Name
+---- -------- -------------------- ------- ------------------------
+1    700      SYSTEM               YES     /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_system_jglztgf6_.dbf
+2    210      PDB$SEED:SYSTEM      NO      /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_system_jglzv2d2_.dbf
+3    550      SYSAUX               NO      /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_sysaux_jglzvh2m_.dbf
+4    165      PDB$SEED:SYSAUX      NO      /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_sysaux_jglzw0pp_.dbf
+5    210      UNDOTBS1             YES     /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_undotbs1_jglzw74q_.dbf
+6    215      PDB$SEED:UNDOTBS1    NO      /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_undotbs1_jglzwfh5_.dbf
+7    5        USERS                NO      /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_users_jglzxlg6_.dbf
+8    210      ORCLPDB1:SYSTEM      NO      /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_system_jgm2wqm9_.dbf
+9    165      ORCLPDB1:SYSAUX      NO      /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_sysaux_jgm2wqnm_.dbf
+10   215      ORCLPDB1:UNDOTBS1    NO      /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_undotbs1_jgm2wqnn_.dbf
+11   5        ORCLPDB1:USERS       NO      /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_users_jgm2y4d5_.dbf
+
+List of Temporary Files
+=======================
+File Size(MB) Tablespace           Maxsize(MB) Tempfile Name
+---- -------- -------------------- ----------- --------------------
+1    20       TEMP                 32767       /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_temp_jglzwhtj_.tmp
+2    20       PDB$SEED:TEMP        32767       /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_temp_jglzwjnl_.tmp
+3    20       ORCLPDB1:TEMP        32767       /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_temp_jgm2wqnn_.dbf
+
+
+Step 4
+------
+
+ lets generate the script 
+ 
+  [oracle@localhost ~]$ sqlplus -s / as sysdba
+set lines 200
+set pages 50
+set feed off
+set head off
+spool /tmp/db-o-mv.sql.sql
+select 'ALTER DATABASE MOVE DATAFILE '''||name||''' TO ''+DATA2'';' from v$datafile
+order by con_id;
+
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_users_jglzxlg6_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_undotbs1_jglzw74q_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_sysaux_jglzvh2m_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_system_jglztgf6_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_sysaux_jglzw0pp_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_system_jglzv2d2_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_undotbs1_jglzwfh5_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_system_jgm2wqm9_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_sysaux_jgm2wqnm_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_undotbs1_jgm2wqnn_.dbf' TO '+DATA2';
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_users_jgm2y4d5_.dbf' TO '+DATA2';
+spool end;
+exit
+
+
+[oracle@localhost ~]$ cat /tmp/db-o-mv.sql.sql
+
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_users_jglzxlg6_.dbf' TO '+DATA2';                                                                                         
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_undotbs1_jglzw74q_.dbf' TO '+DATA2';                                                                                      
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_sysaux_jglzvh2m_.dbf' TO '+DATA2';                                                                                        
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_system_jglztgf6_.dbf' TO '+DATA2';                                                                                        
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_sysaux_jglzw0pp_.dbf' TO '+DATA2';                                                       
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_system_jglzv2d2_.dbf' TO '+DATA2';                                                       
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_undotbs1_jglzwfh5_.dbf' TO '+DATA2';                                                     
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_system_jgm2wqm9_.dbf' TO '+DATA2';                                                       
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_sysaux_jgm2wqnm_.dbf' TO '+DATA2';                                                       
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_undotbs1_jgm2wqnn_.dbf' TO '+DATA2';                                                     
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_users_jgm2y4d5_.dbf' TO '+DATA2'; 
+
+
+Step 5
+------
+
+ lets do some changes as it is required to move the PDB  datafiles as well
+
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_users_jglzxlg6_.dbf' TO '+DATA2';                                                                                   
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_undotbs1_jglzw74q_.dbf' TO '+DATA2';                                                                                    
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_sysaux_jglzvh2m_.dbf' TO '+DATA2';                                                                                        
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_system_jglztgf6_.dbf' TO '+DATA2';   
+                                                                                   
+
+ALTER SESSION SET CONTAINER=pdb$seed;
+
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_system_jglzv2d2_.dbf' TO '+DATA2'; 
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_sysaux_jglzw0pp_.dbf' TO '+DATA2';   
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_undotbs1_jglzwfh5_.dbf' TO '+DATA2';      
+
+ALTER SESSION SET CONTAINER=orclpdb1;
+ALTER DATABASE OPEN;
+
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_system_jgm2wqm9_.dbf' TO '+DATA2';                                              
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_sysaux_jgm2wqnm_.dbf' TO '+DATA2';                                                  
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_undotbs1_jgm2wqnn_.dbf' TO '+DATA2';                                                   
+ALTER DATABASE MOVE DATAFILE '/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_users_jgm2y4d5_.dbf' TO '+DATA2'; 
+  
+Step 5
+------
+
+lets start moving the datafiles
+
+  
+  SQL> @db-o-mv.sql
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Session altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+
+Database altered.
+
+Step 6
+------  
+ 
+SQL> show con_name
+
+CON_NAME
+------------------------------
+CDB$ROOT 
+ 
+SQL> select file_name from cdb_data_files;
+
+FILE_NAME
+--------------------------------------------------------------------------------
++DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/system.263.1077562541
++DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/sysaux.264.1077562563
++DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/undotbs1.265.1077562579
+
++DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/users.266.1077562599
++DATA2/ORCLLCDB/DATAFILE/system.259.1077561563
++DATA2/ORCLLCDB/DATAFILE/sysaux.258.1077561505
++DATA2/ORCLLCDB/DATAFILE/undotbs1.257.1077561485
++DATA2/ORCLLCDB/DATAFILE/users.256.1077561481
+
+8 rows selected.
+
+SQL> show con_name
+
+CON_NAME
+------------------------------
+CDB$ROOT
+ 
+
+as you can see above  the PDB$SEED datafiles are not visible and that is the expected behavior from 12.2 onwards
+if we need to see that with CDB_DATA_FILES we need to set the  hidden parameter
+ "_EXCLUDE_SEED_CDB_VIEW" = FALSE at session or instance level as per DocId - 
+ PDB$SEED Datafiles Not Appear In CDB_DATA_FILES (Doc ID 1940806.1
+ 
+
+ SQL> alter session set container=pdb$seed;
+
+Session altered.
+
+SQL> select con_id,file_name from cdb_data_files;
+
+    CON_ID   FILE_NAME
+-----------  ---------------------------------------------------------------------
+	 2   +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/system.260.1077561629
+
+	 2   +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/sysaux.261.1077561653
+
+	 2   +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/undotbs1.262.1077561669
+
+ 
+ you can see CDB , PDBs  datafiles have been migrated to ASM.
+ 
+ Step 7
+ ------
+ 
+ let's verify the Migration
+ 
+ [oracle@localhost ~]$ rman target /
+
+Recovery Manager: Release 12.2.0.1.0 - Production on Sun Jul 11 11:22:11 2021
+
+Copyright (c) 1982, 2017, Oracle and/or its affiliates.  All rights reserved.
+
+connected to target database: ORCLLCDB (DBID=1978884231)
+
+RMAN> report schema;
+
+using target database control file instead of recovery catalog
+Report of database schema for database with db_unique_name ORCLLCDB
+
+List of Permanent Datafiles
+===========================
+File Size(MB) Tablespace           RB segs Datafile Name
+---- -------- -------------------- ------- ------------------------
+1    700      SYSTEM               YES     +DATA2/ORCLLCDB/DATAFILE/system.259.1077561563
+2    210      PDB$SEED:SYSTEM      NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/system.260.1077561629
+3    550      SYSAUX               NO      +DATA2/ORCLLCDB/DATAFILE/sysaux.258.1077561505
+4    165      PDB$SEED:SYSAUX      NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/sysaux.261.1077561653
+5    210      UNDOTBS1             YES     +DATA2/ORCLLCDB/DATAFILE/undotbs1.257.1077561485
+6    215      PDB$SEED:UNDOTBS1    NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/undotbs1.262.1077561669
+7    5        USERS                NO      +DATA2/ORCLLCDB/DATAFILE/users.256.1077561481
+8    210      ORCLPDB1:SYSTEM      YES     +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/system.263.1077562541
+9    165      ORCLPDB1:SYSAUX      NO      +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/sysaux.264.1077562563
+10   215      ORCLPDB1:UNDOTBS1    YES     +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/undotbs1.265.1077562579
+11   5        ORCLPDB1:USERS       NO      +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/users.266.1077562599
+
+List of Temporary Files
+=======================
+File Size(MB) Tablespace           Maxsize(MB) Tempfile Name
+---- -------- -------------------- ----------- --------------------
+1    20       TEMP                 32767       /u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_temp_jglzwhtj_.tmp
+2    20       PDB$SEED:TEMP        32767       /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_temp_jglzwjnl_.tmp
+3    20       ORCLPDB1:TEMP        32767       /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_temp_jgm2wqnn_.dbf
+
+
+you can see above  still the tempfile are in the local filesystem
+
+
+
+SQL> select name from v$tempfile;
+
+NAME
+--------------------------------------------------------------------------------
+/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_temp_jglzwhtj_.tmp
+/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf
+_temp_jglzwjnl_.tmp
+
+/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf
+_temp_jgm2wqnn_.dbf
+
+
+
+Step 8
+------
+
+let's move the CDB's  temp file to ASM
+
+[oracle@localhost ~]$ sqlplus sys as sysdba
+
+SQL*Plus: Release 12.2.0.1.0 Production on Sun Jul 11 11:22:33 2021
+
+Copyright (c) 1982, 2016, Oracle.  All rights reserved.
+
+Enter password: 
+
+Connected to:
+Oracle Database 12c Enterprise Edition Release 12.2.0.1.0 - 64bit Production
+
+SQL> alter tablespace TEMP add tempfile '+DATA2';
+
+Tablespace altered.
+
+SQL> select name from v$tempfile;
+
+NAME
+--------------------------------------------------------------------------------
+/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_temp_jglzwhtj_.tmp
+/u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf
+_temp_jglzwjnl_.tmp
+
+/u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf
+_temp_jgm2wqnn_.dbf
+
++DATA2/ORCLLCDB/TEMPFILE/temp.267.1077621823
+
+Drop the existing one 
+---------------------
+
+
+SQL> alter tablespace TEMP drop tempfile '/u01/app/oracle/oradata/ORCLLCDB/datafile/o1_mf_temp_jglzwhtj_.tmp';
+
+Tablespace altered.
+
+
+
+SQL> select con_id,name from v$tempfile;
+
+    CON_ID  NAME
+----------- ---------------------------------------------------------------------
+	 2  /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_temp_jglzwjnl_.tmp
+
+	 3  /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_temp_jgm2wqnn_.dbf
+
+	 1  +DATA2/ORCLLCDB/TEMPFILE/temp.267.1077621823
+	 
+	 
+	 
+Step 9
+------
+
+ lets move the the Pdb's  temp file
+ 
+ SQL> show pdbs;                      
+
+    CON_ID CON_NAME			  OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+	 2 PDB$SEED			  READ ONLY  NO
+	 3 ORCLPDB1			  READ WRITE NO
+SQL> alter session set container=orclpdb1;
+
+Session altered.
+
+SQL> alter tablespace TEMP add tempfile '+DATA2';
+
+Tablespace altered.
+
+
+SQL> select con_id,name,file# from v$tempfile;
+
+    CON_ID  NAME                                                                                              FILE#
+----------  -------------                                                                                     -----  
+	 3 /u01/app/oracle/oradata/ORCLLCDB/C6C49E23C9BF550EE055000000000001/datafile/o1_mf_temp_jgm2wqnn_.dbf   3
+	 3 +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/TEMPFILE/temp.268.1077622051                         5
+
+   
+
+
+SQL> alter tablespace TEMP drop tempfile 3;
+
+Tablespace altered.
+
+SQL> select con_id,name,file# from v$tempfile;
+
+    CON_ID  NAME                                                                                              FILE#
+----------  -------------                                                                                     -----  
+	 3 +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/TEMPFILE/temp.268.1077622051                         5
+ 
+ 
+ Step 10
+ -------
+ 
+ lets move the tempfile of  PDB$SEED and drop it , in this case with 12.2 having local undo it is possible to open the
+ seed in read write mode without enabling "_oracle_script"=TRUE as it has some side effects
+ 
+ 
+ 
+ SQL> alter session set container=CDB$ROOT;
+
+Session altered.
+
+SQL> alter pluggable database pdb$seed close;
+
+Pluggable database altered.
+
+SQL> alter pluggable database pdb$seed open read write;
+
+Pluggable database altered.
+
+SQL> alter session set container=pdb$seed;
+
+Session altered.
+
+SQL> alter tablespace temp add tempfile '+DATA2';
+
+Tablespace altered.
+
+SQL> select con_id,name,file# from v$tempfile;
+
+   
+    CON_ID  NAME                                                                                                FILE#
+----------  -------------                                                                                       -----  
+	 2 /u01/app/oracle/oradata/ORCLLCDB/C6C3E2BC118039FDE055000000000001/datafile/o1_mf_temp_jglzwjnl_.tmp     2
+         2 +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/TEMPFILE/temp.269.1077622485                           6   
+
+
+
+SQL> alter tablespace TEMP drop tempfile 2;
+
+Tablespace altered.
+
+SQL> select con_id,name,file# from v$tempfile;
+
+   CON_ID  NAME                                                                                                FILE#
+----------  -------------                                                                                       -----  
+        2 +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/TEMPFILE/temp.269.1077622485                           6   
+
+
+Step 11
+-------
+
+ Make the seed database read only
+ 
+ SQL> alter session set container=CDB$ROOT;
+
+Session altered.
+
+SQL> alter pluggable database pdb$seed close;
+
+Pluggable database altered.
+
+SQL> alter pluggable database pdb$seed open read only;
+
+Pluggable database altered.
+
+SQL> show pdbs;
+
+    CON_ID CON_NAME			  OPEN MODE  RESTRICTED
+---------- ------------------------------ ---------- ----------
+	 2 PDB$SEED			  READ ONLY  NO
+	 3 ORCLPDB1			  READ WRITE NO
+	 
+	 
+Step 12
+------
+
+
+ confirm the mogration is success
+ 
+ SQL> exit
+Disconnected from Oracle Database 12c Enterprise Edition Release 12.2.0.1.0 - 64bit Production
+[oracle@localhost ~]$ rman target /
+
+Recovery Manager: Release 12.2.0.1.0 - Production on Sun Jul 11 11:37:07 2021
+
+Copyright (c) 1982, 2017, Oracle and/or its affiliates.  All rights reserved.
+
+connected to target database: ORCLLCDB (DBID=1978884231)
+
+RMAN> report schema;
+
+using target database control file instead of recovery catalog
+Report of database schema for database with db_unique_name ORCLLCDB
+
+List of Permanent Datafiles
+===========================
+File Size(MB) Tablespace           RB segs Datafile Name
+---- -------- -------------------- ------- ------------------------
+1    700      SYSTEM               YES     +DATA2/ORCLLCDB/DATAFILE/system.259.1077561563
+2    210      PDB$SEED:SYSTEM      NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/system.260.1077561629
+3    550      SYSAUX               NO      +DATA2/ORCLLCDB/DATAFILE/sysaux.258.1077561505
+4    165      PDB$SEED:SYSAUX      NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/sysaux.261.1077561653
+5    210      UNDOTBS1             YES     +DATA2/ORCLLCDB/DATAFILE/undotbs1.257.1077561485
+6    215      PDB$SEED:UNDOTBS1    NO      +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/DATAFILE/undotbs1.262.1077561669
+7    5        USERS                NO      +DATA2/ORCLLCDB/DATAFILE/users.256.1077561481
+8    210      ORCLPDB1:SYSTEM      YES     +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/system.263.1077562541
+9    165      ORCLPDB1:SYSAUX      NO      +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/sysaux.264.1077562563
+10   215      ORCLPDB1:UNDOTBS1    YES     +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/undotbs1.265.1077562579
+11   5        ORCLPDB1:USERS       NO      +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/DATAFILE/users.266.1077562599
+
+List of Temporary Files
+=======================
+File Size(MB) Tablespace           Maxsize(MB) Tempfile Name
+---- -------- -------------------- ----------- --------------------
+4    100      TEMP                 32767       +DATA2/ORCLLCDB/TEMPFILE/temp.267.1077621823
+5    100      ORCLPDB1:TEMP        32767       +DATA2/ORCLLCDB/C6C49E23C9BF550EE055000000000001/TEMPFILE/temp.268.1077622051
+6    100      PDB$SEED:TEMP        32767       +DATA2/ORCLLCDB/C6C3E2BC118039FDE055000000000001/TEMPFILE/temp.269.1077622485
+
+	 
+
